@@ -13,7 +13,14 @@ def capture(settings):
     elif mode == "Selected Region":
         image = capture_rect(settings["region"])
     else:
-        image = capture_window(settings["window"], settings.get("fallback", False))
+        region = settings.get("window_region")
+        image = capture_window(settings["window"], settings.get("fallback", False) and not region)
+        if region:
+            left, top = region["left"], region["top"]
+            right, bottom = left + region["width"], top + region["height"]
+            if not (0 <= left < right <= image.width and 0 <= top < bottom <= image.height):
+                raise ValueError("選區超出目前視窗大小，請重新選取。")
+            return image.crop((left, top, right, bottom))
     if max(ImageStat.Stat(image).stddev) < 0.5:
         raise RuntimeError("截圖為單色或空白：可能擷取失敗，也可能是有效純色內容；請確認目標畫面。")
     if mode == "Full Screen" and settings.get("resolution"):

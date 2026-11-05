@@ -5,6 +5,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from PySide6.QtCore import QObject, Signal, QTimer, Qt
 from PySide6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem, QPushButton, QLabel, QMessageBox, QFileDialog, QSplitter, QScrollArea)
+from PySide6.QtGui import QImage
 from capture.service import capture
 from gui.capture_panel import CapturePanel
 from gui.scheduler_panel import SchedulerPanel
@@ -29,6 +30,7 @@ STATUS_LABELS = {
 class Signals(QObject):
     request = Signal(str)
     complete = Signal(str, str, str, str)
+    preview_ready = Signal(object, object, str)
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -39,10 +41,12 @@ class MainWindow(QMainWindow):
         self.tasks = {}
         self.busy = set()
         self.closing = False
+        self.preview_pending = False
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="capture")
         self.signals = Signals()
         self.signals.request.connect(self.enqueue)
         self.signals.complete.connect(self.completed)
+        self.signals.preview_ready.connect(self.window_preview_ready)
         self.scheduler = TaskScheduler(self.signals.request.emit)
         widget = QWidget()
         self.setCentralWidget(widget)
@@ -58,6 +62,11 @@ class MainWindow(QMainWindow):
         center = QWidget()
         center_layout = QVBoxLayout(center)
         self.capture_panel = CapturePanel()
+        self.capture_panel.preview_requested.connect(self.request_window_preview)
+        self.capture_panel.set_mode(self.modes.currentItem().data(Qt.UserRole))
+        self.modes.currentItemChanged.connect(
+            lambda current, previous: self.capture_panel.set_mode(current.data(Qt.UserRole))
+        )
         self.schedule_panel = SchedulerPanel()
         center_layout.addWidget(self.capture_panel)
         center_layout.addWidget(self.schedule_panel)
@@ -83,6 +92,39 @@ class MainWindow(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_tasks)
         self.timer.start(1000)
+
+    def request_window_preview(self, target):
+        if self.closing or self.preview_pending:
+            return
+        self.preview_pending = True
+        self.capture_panel.pick.setEnabled(False)
+        self.status.setText("正在取得目標視窗的背景預覽…")
+        self.pool.submit(self.capture_window_preview, target)
+
+    def capture_window_preview(self, target):
+        image = None
+        error = ""
+        try:
+            frame = capture(dict(mode="Window Capture", window=target, fallback=False))
+            image = QImage(frame.tobytes(), frame.width, frame.height, frame.width * 3,
+                           QImage.Format_RGB888).copy()
+        except Exception as exc:
+            logging.exception("Window preview failed")
+            error = str(exc)
+        self.signals.preview_ready.emit(image, (target["hwnd"], target["pid"]), error)
+
+    def window_preview_ready(self, image, key, error):
+        self.preview_pending = False
+        self.capture_panel.pick.setEnabled(True)
+        if self.closing:
+            if not self.busy:
+                self.close()
+            return
+        self.status.setText(error or "背景預覽已就緒")
+        if error:
+            QMessageBox.warning(self, "無法取得背景預覽", error)
+        else:
+            self.capture_panel.apply_window_preview(image, key)
 
     def settings(self):
         settings = self.capture_panel.settings(self.modes.currentItem().data(Qt.UserRole))
@@ -155,7 +197,7 @@ class MainWindow(QMainWindow):
             task["status"] = "Error" if error else ("Scheduled" if self.scheduler.scheduler.get_job(task_id) else "Complete")
         self.status.setText(error or f"已儲存：{path}")
         self.update_tasks()
-        if self.closing and not self.busy:
+        if self.closing and not self.busy and not self.preview_pending:
             self.close()
 
     def selected_id(self):
@@ -227,7 +269,7 @@ class MainWindow(QMainWindow):
             self.closing = True
             self.scheduler.close()
             self.pool.shutdown(wait=False,cancel_futures=False)
-        if self.busy:
+        if self.busy or self.preview_pending:
             event.ignore()
             self.status.setText("等待已排入的截圖完成後關閉…")
         else:

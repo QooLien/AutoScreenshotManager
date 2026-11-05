@@ -1,15 +1,21 @@
 from dataclasses import asdict
 from itertools import groupby
 import logging
-from PySide6.QtCore import QPoint, QTimer, Qt
+from PySide6.QtCore import QPoint, QTimer, Qt, Signal
 from PySide6.QtGui import QImage
 from pathlib import Path
-from PySide6.QtWidgets import (QWidget, QFormLayout, QComboBox, QLineEdit, QSpinBox, QCheckBox, QPushButton, QFileDialog, QGridLayout)
+from PySide6.QtWidgets import (QWidget, QFormLayout, QComboBox, QLineEdit, QSpinBox, QCheckBox, QPushButton, QFileDialog, QGridLayout, QLabel, QMessageBox)
 from capture.screen_capture import capture_rect, monitors
 from utils.window_manager import list_windows
 from gui.region_capture import RegionOverlay
+from gui.window_region import WindowRegionDialog
+
+WINDOW_MODES = ("Window Capture", "Application Capture")
+
 
 class CapturePanel(QWidget):
+    preview_requested = Signal(dict)
+
     def __init__(self):
         super().__init__()
         layout = QFormLayout(self)
@@ -42,8 +48,15 @@ class CapturePanel(QWidget):
             field.setPrefix({"left": "左：", "top": "上：", "width": "寬：", "height": "高："}[key])
             self.region[key] = field
             row.addWidget(field, index // 2, index % 2)
-        pick = QPushButton("拖曳選取區域（Esc 取消）")
-        pick.clicked.connect(self.select_region)
+        self.mode = "Full Screen"
+        self.window_region = None
+        self.region_target = None
+        self.pick = QPushButton("拖曳選取區域（Esc 取消）")
+        self.pick.clicked.connect(self.select_region)
+        self.crop_label = QLabel()
+        self.clear_crop = QPushButton("清除視窗選區")
+        self.clear_crop.clicked.connect(self.clear_window_region)
+        self.windows.currentIndexChanged.connect(self.update_crop_label)
         self.folder = QLineEdit(str(Path.home()/"Pictures"/"AutoScreenshotManager"))
         browse = QPushButton("選擇儲存資料夾")
         browse.clicked.connect(self.browse)
@@ -57,10 +70,13 @@ class CapturePanel(QWidget):
         for label, widget in [("任務名稱", self.name),("顯示器",self.monitor),("全螢幕輸出解析度",self.resolution),("目標視窗",self.windows),("",refresh),("標題關鍵字",self.keyword),("",self.fallback)]:
             layout.addRow(label,widget)
         layout.addRow("實體像素座標",row)
-        layout.addRow(pick)
+        layout.addRow(self.pick)
+        layout.addRow(self.crop_label)
+        layout.addRow(self.clear_crop)
         for label, widget in [("儲存位置",self.folder),("",browse),("格式",self.format),("JPG 品質",self.quality),("",self.date)]:
             layout.addRow(label,widget)
         self.refresh()
+        self.set_mode(self.mode)
 
     def refresh(self):
         selected = self.windows.currentData()
@@ -85,7 +101,57 @@ class CapturePanel(QWidget):
                     selected_index = index
         self.windows.setCurrentIndex(selected_index if selected_index != -1 else first)
 
+    def set_mode(self, mode):
+        self.mode = mode
+        self.pick.setText("在視窗預覽上拖曳選區" if mode in WINDOW_MODES else "拖曳選取區域（Esc 取消）")
+        self.update_crop_label()
+
+    def window_key(self):
+        target = self.windows.currentData()
+        return (target["hwnd"], target["pid"]) if target else None
+
+    def active_window_region(self):
+        if self.mode in WINDOW_MODES and self.region_target == self.window_key():
+            return self.window_region
+        return None
+
+    def update_crop_label(self):
+        region = self.active_window_region()
+        self.crop_label.setVisible(self.mode in WINDOW_MODES)
+        self.clear_crop.setVisible(region is not None)
+        if region:
+            self.crop_label.setText(
+                f"視窗內選區：左 {region['left']}，上 {region['top']}，"
+                f"{region['width']} × {region['height']} 像素"
+            )
+        else:
+            self.crop_label.setText("目前擷取整個目標視窗")
+
+    def clear_window_region(self):
+        self.window_region = None
+        self.region_target = None
+        self.update_crop_label()
+
+    def apply_window_preview(self, image, key):
+        if self.mode not in WINDOW_MODES or key != self.window_key():
+            return
+        dialog = WindowRegionDialog(image, self)
+        if dialog.exec():
+            self.window_region = dialog.region
+            self.region_target = key
+            self.update_crop_label()
+        dialog.deleteLater()
+
     def select_region(self):
+        if self.mode in WINDOW_MODES:
+            target = self.windows.currentData()
+            if not target:
+                QMessageBox.warning(self, "請選取目標", "請先從清單選擇要截圖的視窗。")
+                return
+            target = dict(target)
+            target["keyword"] = self.keyword.text() or target["title"]
+            self.preview_requested.emit(target)
+            return
         main_window = self.window()
         main_window.hide()
         # Let Windows remove the main window from the desktop before sampling.
@@ -139,9 +205,10 @@ class CapturePanel(QWidget):
             window["keyword"] = self.keyword.text() or window["title"]
         if not self.folder.text().strip():
             raise ValueError("請選擇儲存位置")
-        return dict(name=self.name.text() or "Capture", mode=mode, monitor=self.monitor.currentData(), resolution=self.resolution.currentData(), window=window, region={k:v.value() for k,v in self.region.items()}, fallback=self.fallback.isChecked(), folder=self.folder.text(), format=self.format.currentText(), quality=self.quality.value(), date_folder=self.date.isChecked())
+        return dict(name=self.name.text() or "Capture", mode=mode, monitor=self.monitor.currentData(), resolution=self.resolution.currentData(), window=window, window_region=self.active_window_region(), region={k:v.value() for k,v in self.region.items()}, fallback=self.fallback.isChecked(), folder=self.folder.text(), format=self.format.currentText(), quality=self.quality.value(), date_folder=self.date.isChecked())
 
     def restore(self, data):
+        self.clear_window_region()
         self.name.setText(data["name"])
         self.folder.setText(data["folder"])
         self.format.setCurrentText(data["format"])
@@ -156,3 +223,6 @@ class CapturePanel(QWidget):
             self.windows.addItem(f"已儲存目標：{target['process']} | {target['title']}",target)
             self.windows.setCurrentIndex(self.windows.count()-1)
             self.keyword.setText(target.get("keyword",""))
+            self.window_region = data.get("window_region")
+            self.region_target = self.window_key()
+            self.update_crop_label()
