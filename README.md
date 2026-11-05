@@ -4,15 +4,15 @@ Windows 桌面定時截圖工具，Python 3.11+、PySide6（固定官方 Essenti
 
 ## 安裝與執行
 
-Windows 10 64-bit，建議 Python 3.11 或 3.12 64-bit。於本資料夾開啟 PowerShell：
+Windows 10 64-bit，以下使用已在本機驗證的 Python 3.13（64-bit）。於本資料夾開啟 PowerShell：
 
 ```powershell
-py -3.11 -m venv .venv
+py -3.13 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 .\.venv\Scripts\python.exe main.py
 ```
 
-不需啟用 PowerShell activation script。若使用其他 Python 版本，調整 `py -3.11`。一般使用只需 requirements.txt；開發測試和封裝需 requirements-dev.txt。需互動式 Windows 桌面，不是 Windows Service。`requirements-tested.txt` 保存本機 Python 3.13 的完整測試依賴版本；可用 `python -m pip install -r requirements-tested.txt` 重建相同版本環境。
+不需啟用 PowerShell activation script。若使用其他 Python 版本，調整 `py -3.13`。一般使用只需 requirements.txt；開發測試和封裝需 requirements-dev.txt。需互動式 Windows 桌面，不是 Windows Service。`requirements-tested.txt` 保存本機 Python 3.13 的完整測試依賴版本；可用 `python -m pip install -r requirements-tested.txt` 重建相同版本環境。
 
 ## 操作
 
