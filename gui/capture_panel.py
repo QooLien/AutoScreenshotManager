@@ -66,6 +66,8 @@ class CapturePanel(QWidget):
         self.web_delay.setValue(1)
         web_form.addRow("網址", self.web_url)
         web_form.addRow("圖表 CSS 選擇器", self.web_selector)
+        self.web_pick = QPushButton("在網頁上點選元素")
+        web_form.addRow(self.web_pick)
         web_form.addRow("圖表出現後等待（秒）", self.web_delay)
         self.crop_label = QLabel()
         self.clear_crop = QPushButton("清除視窗選區")

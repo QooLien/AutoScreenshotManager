@@ -1,12 +1,16 @@
+import asyncio
 import copy
 import logging
 import uuid
 from datetime import datetime
+from threading import Event
 from concurrent.futures import ThreadPoolExecutor
 from PySide6.QtCore import QObject, Signal, QTimer, Qt
 from PySide6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem, QPushButton, QLabel, QMessageBox, QFileDialog, QSplitter, QScrollArea)
 from PySide6.QtGui import QImage
 from capture.service import capture
+from capture.web_capture import validate_web_url
+from capture.web_picker import pick_web_element
 from gui.capture_panel import CapturePanel
 from gui.scheduler_panel import SchedulerPanel
 from gui.preview_widget import PreviewWidget
@@ -32,6 +36,7 @@ class Signals(QObject):
     request = Signal(str)
     complete = Signal(str, str, str, str)
     preview_ready = Signal(object, object, str)
+    web_pick_ready = Signal(str, object, str)
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -43,11 +48,14 @@ class MainWindow(QMainWindow):
         self.busy = set()
         self.closing = False
         self.preview_pending = False
+        self.web_pick_cancel = None
+        self.web_picker_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="web-picker")
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="capture")
         self.signals = Signals()
         self.signals.request.connect(self.enqueue)
         self.signals.complete.connect(self.completed)
         self.signals.preview_ready.connect(self.window_preview_ready)
+        self.signals.web_pick_ready.connect(self.web_picker_ready)
         self.scheduler = TaskScheduler(self.signals.request.emit)
         widget = QWidget()
         self.setCentralWidget(widget)
@@ -64,6 +72,7 @@ class MainWindow(QMainWindow):
         center_layout = QVBoxLayout(center)
         self.capture_panel = CapturePanel()
         self.capture_panel.preview_requested.connect(self.request_window_preview)
+        self.capture_panel.web_pick.clicked.connect(self.toggle_web_picker)
         self.capture_panel.set_mode(self.modes.currentItem().data(Qt.UserRole))
         self.modes.currentItemChanged.connect(
             lambda current, previous: self.capture_panel.set_mode(current.data(Qt.UserRole))
@@ -94,6 +103,55 @@ class MainWindow(QMainWindow):
         self.timer.timeout.connect(self.update_tasks)
         self.timer.start(1000)
 
+    def toggle_web_picker(self):
+        if self.closing:
+            return
+        if self.web_pick_cancel is not None:
+            self.web_pick_cancel.set()
+            self.capture_panel.web_pick.setEnabled(False)
+            return
+        url = self.capture_panel.web_url.text().strip()
+        try:
+            validate_web_url(url)
+        except ValueError as exc:
+            QMessageBox.warning(self, "請檢查網址", str(exc))
+            return
+        self.web_pick_cancel = Event()
+        self.capture_panel.web_pick.setText("取消網頁元素選取")
+        self.status.setText("在 Edge 視窗內將滑鼠移到圖表，再點一下。關閉 Edge 可取消。")
+        self.web_picker_pool.submit(self.run_web_picker, url, self.web_pick_cancel)
+
+    def run_web_picker(self, url, cancelled):
+        selector = None
+        error = ""
+        try:
+            selector = asyncio.run(pick_web_element(url, cancelled))
+        except Exception as exc:
+            if not cancelled.is_set():
+                logging.exception("Web element picker failed")
+                error = str(exc)
+        self.signals.web_pick_ready.emit(url, selector if not cancelled.is_set() else None, error)
+
+    def web_picker_ready(self, url, selector, error):
+        cancelled = self.web_pick_cancel.is_set()
+        self.web_pick_cancel = None
+        self.capture_panel.web_pick.setText("在網頁上點選元素")
+        self.capture_panel.web_pick.setEnabled(True)
+        if self.closing:
+            if not self.busy and not self.preview_pending:
+                self.close()
+            return
+        if cancelled:
+            self.status.setText("已取消選取")
+        elif error:
+            self.status.setText(error)
+            QMessageBox.warning(self, "無法選取網頁元素", error)
+        elif selector and url == self.capture_panel.web_url.text().strip():
+            self.capture_panel.web_selector.setText(selector)
+            self.status.setText("已填入 CSS 選擇器。可先按「立即截圖」確認範圍。")
+        else:
+            self.status.setText("已取消選取或網址已變更")
+
     def request_window_preview(self, target):
         if self.closing or self.preview_pending:
             return
@@ -118,7 +176,7 @@ class MainWindow(QMainWindow):
         self.preview_pending = False
         self.capture_panel.pick.setEnabled(True)
         if self.closing:
-            if not self.busy:
+            if not self.busy and self.web_pick_cancel is None:
                 self.close()
             return
         self.status.setText(error or "背景預覽已就緒")
@@ -198,7 +256,7 @@ class MainWindow(QMainWindow):
             task["status"] = "Error" if error else ("Scheduled" if self.scheduler.scheduler.get_job(task_id) else "Complete")
         self.status.setText(error or f"已儲存：{path}")
         self.update_tasks()
-        if self.closing and not self.busy and not self.preview_pending:
+        if self.closing and not self.busy and not self.preview_pending and self.web_pick_cancel is None:
             self.close()
 
     def selected_id(self):
@@ -269,8 +327,11 @@ class MainWindow(QMainWindow):
         if not self.closing:
             self.closing = True
             self.scheduler.close()
+            if self.web_pick_cancel is not None:
+                self.web_pick_cancel.set()
+            self.web_picker_pool.shutdown(wait=False)
             self.pool.shutdown(wait=False,cancel_futures=False)
-        if self.busy or self.preview_pending:
+        if self.busy or self.preview_pending or self.web_pick_cancel is not None:
             event.ignore()
             self.status.setText("等待已排入的截圖完成後關閉…")
         else:

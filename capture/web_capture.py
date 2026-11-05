@@ -3,13 +3,19 @@ from urllib.parse import urlsplit
 
 from PIL import Image
 
+WEB_VIEWPORT = {"width": 1920, "height": 1080}
 
-def validate_web_target(url, selector):
+
+def validate_web_url(url):
     parsed = urlsplit(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise ValueError("請輸入有效的 HTTP 或 HTTPS 網址。")
     if parsed.username is not None or parsed.password is not None:
         raise ValueError("請勿在網址中填入帳號或密碼。")
+
+
+def validate_web_target(url, selector):
+    validate_web_url(url)
     if not selector.strip():
         raise ValueError("請輸入圖表的 CSS 選擇器。")
 
@@ -28,7 +34,7 @@ def capture_web(target):
         except Error as exc:
             raise RuntimeError(f"無法開啟背景瀏覽器，請確認已安裝 Microsoft Edge。{exc}") from exc
         try:
-            page = browser.new_page(viewport={"width": 1920, "height": 1080}, accept_downloads=False)
+            page = browser.new_page(viewport=WEB_VIEWPORT, accept_downloads=False)
             page.set_default_timeout(30_000)
             response = page.goto(url, wait_until="domcontentloaded")
             if response is not None and not response.ok:
