@@ -6,6 +6,7 @@ from PySide6.QtGui import QImage
 from pathlib import Path
 from PySide6.QtWidgets import (QWidget, QFormLayout, QComboBox, QLineEdit, QSpinBox, QCheckBox, QPushButton, QFileDialog, QGridLayout, QLabel, QMessageBox)
 from capture.screen_capture import capture_rect, monitors
+from capture.web_capture import validate_web_target
 from utils.window_manager import list_windows
 from gui.region_capture import RegionOverlay
 from gui.window_region import WindowRegionDialog
@@ -53,6 +54,19 @@ class CapturePanel(QWidget):
         self.region_target = None
         self.pick = QPushButton("拖曳選取區域（Esc 取消）")
         self.pick.clicked.connect(self.select_region)
+        self.web_fields = QWidget()
+        web_form = QFormLayout(self.web_fields)
+        web_form.setContentsMargins(0, 0, 0, 0)
+        self.web_url = QLineEdit()
+        self.web_url.setPlaceholderText("https://…")
+        self.web_selector = QLineEdit()
+        self.web_selector.setPlaceholderText("#chart 或 .dashboard-chart")
+        self.web_delay = QSpinBox()
+        self.web_delay.setRange(0, 60)
+        self.web_delay.setValue(1)
+        web_form.addRow("網址", self.web_url)
+        web_form.addRow("圖表 CSS 選擇器", self.web_selector)
+        web_form.addRow("圖表出現後等待（秒）", self.web_delay)
         self.crop_label = QLabel()
         self.clear_crop = QPushButton("清除視窗選區")
         self.clear_crop.clicked.connect(self.clear_window_region)
@@ -71,6 +85,7 @@ class CapturePanel(QWidget):
             layout.addRow(label,widget)
         layout.addRow("實體像素座標",row)
         layout.addRow(self.pick)
+        layout.addRow(self.web_fields)
         layout.addRow(self.crop_label)
         layout.addRow(self.clear_crop)
         for label, widget in [("儲存位置",self.folder),("",browse),("格式",self.format),("JPG 品質",self.quality),("",self.date)]:
@@ -103,6 +118,8 @@ class CapturePanel(QWidget):
 
     def set_mode(self, mode):
         self.mode = mode
+        self.web_fields.setVisible(mode == "Web Chart")
+        self.pick.setVisible(mode != "Web Chart")
         self.pick.setText("在視窗預覽上拖曳選區" if mode in WINDOW_MODES else "拖曳選取區域（Esc 取消）")
         self.update_crop_label()
 
@@ -205,10 +222,19 @@ class CapturePanel(QWidget):
             window["keyword"] = self.keyword.text() or window["title"]
         if not self.folder.text().strip():
             raise ValueError("請選擇儲存位置")
-        return dict(name=self.name.text() or "Capture", mode=mode, monitor=self.monitor.currentData(), resolution=self.resolution.currentData(), window=window, window_region=self.active_window_region(), region={k:v.value() for k,v in self.region.items()}, fallback=self.fallback.isChecked(), folder=self.folder.text(), format=self.format.currentText(), quality=self.quality.value(), date_folder=self.date.isChecked())
+        web = None
+        if mode == "Web Chart":
+            url, selector = self.web_url.text().strip(), self.web_selector.text().strip()
+            validate_web_target(url, selector)
+            web = dict(url=url, selector=selector, delay_seconds=self.web_delay.value())
+        return dict(web=web, name=self.name.text() or "Capture", mode=mode, monitor=self.monitor.currentData(), resolution=self.resolution.currentData(), window=window, window_region=self.active_window_region(), region={k:v.value() for k,v in self.region.items()}, fallback=self.fallback.isChecked(), folder=self.folder.text(), format=self.format.currentText(), quality=self.quality.value(), date_folder=self.date.isChecked())
 
     def restore(self, data):
         self.clear_window_region()
+        web = data.get("web") or {}
+        self.web_url.setText(web.get("url", ""))
+        self.web_selector.setText(web.get("selector", ""))
+        self.web_delay.setValue(web.get("delay_seconds", 1))
         self.name.setText(data["name"])
         self.folder.setText(data["folder"])
         self.format.setCurrentText(data["format"])

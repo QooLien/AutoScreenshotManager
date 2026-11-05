@@ -16,7 +16,8 @@
 | PrintWindow 其他應用程式／背景 GPU | 未驗證 | 合成 Qt 視窗結果不能推廣至 Excel、PowerPoint、瀏覽器或最小化視窗 |
 | 第二螢幕／混合 DPI／跨螢幕拖曳 | 未驗證 | 本機只列舉到一個 1920 × 1080 顯示器 |
 | 鎖定／UAC／睡眠喚醒／改時鐘 | 未做人工驗收 | 已加入桌面可用性檢查及 misfire 設定，不代表環境驗收通過 |
-| Office COM／Playwright | 未實作 | Phase 2 / 3 |
+| Office COM | 未實作 | Phase 2 |
+| 網頁圖表 | 通過本機 Edge 測試 | 延遲插入的 CSS 元素裁切為 320 × 180，連續擷取兩次皆重新請求網址並取得不同圖表內容。 |
 | 乾淨 Windows 10 無 Python 環境 | 未驗證 | 尚需獨立測試機 |
 
 原生整合命令 `python tests/windows_capture_smoke.py` 的整體退出碼目前為 1：PrintWindow 部分成功，Selected Region 部分失敗。這是保留的失敗結果，沒有跳過或改成通過。請在可互動的實際桌面重跑。

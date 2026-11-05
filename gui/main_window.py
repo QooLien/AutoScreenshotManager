@@ -20,6 +20,7 @@ MODE_LABELS = {
     "Selected Region": "指定區域",
     "Window Capture": "指定視窗",
     "Application Capture": "指定應用程式",
+    "Web Chart": "網頁圖表",
 }
 STATUS_LABELS = {
     "Ready": "就緒", "Scheduled": "已排程", "Running": "擷取中",

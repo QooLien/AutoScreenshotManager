@@ -4,6 +4,9 @@ from capture.window_capture import capture_window
 
 def capture(settings):
     mode = settings["mode"]
+    if mode == "Web Chart":
+        from capture.web_capture import capture_web
+        return capture_web(settings["web"])
     if mode not in ("Full Screen", "Selected Region", "Window Capture", "Application Capture"):
         raise ValueError("此模式尚未實作")
     from utils.desktop import ensure_interactive_desktop
