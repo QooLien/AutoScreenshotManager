@@ -4,6 +4,8 @@ Windows 桌面定時截圖工具，Python 3.11+、PySide6（固定官方 Essenti
 
 ## 安裝與執行
 
+在另一台 Windows 電腦執行原始碼時，先解壓縮整個專案並安裝 Python 3.13（64-bit，含 Windows Python Launcher），再雙擊 `Start.bat`。首次啟動需連線安裝依賴，完成後會開啟主畫面。若啟動失敗，視窗會保留錯誤訊息。直接雙擊 `main.py` 時，Python 啟動例外會顯示錯誤對話框，詳細資料寫入 `%TEMP%\AutoScreenshotManager-startup.log`。
+
 Windows 10 64-bit，以下使用已在本機驗證的 Python 3.13（64-bit）。於本資料夾開啟 PowerShell：
 
 ```powershell
