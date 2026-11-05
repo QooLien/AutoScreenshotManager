@@ -1,9 +1,11 @@
 from dataclasses import asdict
 from itertools import groupby
-from PySide6.QtCore import Qt
+import logging
+from PySide6.QtCore import QPoint, QTimer, Qt
+from PySide6.QtGui import QImage
 from pathlib import Path
 from PySide6.QtWidgets import (QWidget, QFormLayout, QComboBox, QLineEdit, QSpinBox, QCheckBox, QPushButton, QFileDialog, QGridLayout)
-from capture.screen_capture import monitors
+from capture.screen_capture import capture_rect, monitors
 from utils.window_manager import list_windows
 from gui.region_capture import RegionOverlay
 
@@ -84,10 +86,40 @@ class CapturePanel(QWidget):
         self.windows.setCurrentIndex(selected_index if selected_index != -1 else first)
 
     def select_region(self):
-        self.overlay = RegionOverlay()
-        self.overlay.selected.connect(self.set_region)
-        self.overlay.show()
-        self.overlay.activateWindow()
+        main_window = self.window()
+        main_window.hide()
+        # Let Windows remove the main window from the desktop before sampling.
+        QTimer.singleShot(150, self, self.show_region_overlay)
+
+    def show_region_overlay(self):
+        main_window = self.window()
+        desktop = origin = None
+        try:
+            bounds = monitors()[0]
+            image = capture_rect(bounds)
+            desktop = QImage(image.tobytes(), image.width, image.height,
+                             image.width * 3, QImage.Format_RGB888).copy()
+            origin = QPoint(bounds["left"], bounds["top"])
+        except Exception:
+            logging.exception("Unable to capture the desktop for the region magnifier")
+
+        def restore_window():
+            self.overlay = None
+            main_window.show()
+            main_window.raise_()
+            main_window.activateWindow()
+
+        try:
+            self.overlay = RegionOverlay(desktop, origin)
+            self.overlay.selected.connect(self.set_region)
+            self.overlay.closed.connect(restore_window)
+            self.overlay.show()
+            self.overlay.raise_()
+            self.overlay.activateWindow()
+            self.overlay.setFocus()
+        except Exception:
+            restore_window()
+            raise
 
     def set_region(self, values):
         for key,value in values.items():
