@@ -6,7 +6,8 @@ class SchedulerPanel(QWidget):
         super().__init__()
         layout = QFormLayout(self)
         self.kind = QComboBox()
-        self.kind.addItems(["interval","once"])
+        self.kind.addItem("固定間隔", "interval")
+        self.kind.addItem("單次排程", "once")
         self.seconds = QDoubleSpinBox()
         self.seconds.setRange(1,86400*365)
         self.seconds.setValue(10)
@@ -18,10 +19,10 @@ class SchedulerPanel(QWidget):
         layout.addRow("單次時間（系統本地時區）",self.when)
 
     def settings(self):
-        return dict(kind=self.kind.currentText(),seconds=self.seconds.value(),when=self.when.dateTime().toPython().astimezone().isoformat())
+        return dict(kind=self.kind.currentData(),seconds=self.seconds.value(),when=self.when.dateTime().toPython().astimezone().isoformat())
 
     def restore(self, data):
-        self.kind.setCurrentText(data["kind"])
+        self.kind.setCurrentIndex(self.kind.findData(data["kind"]))
         self.seconds.setValue(data["seconds"])
         from datetime import datetime
         self.when.setDateTime(QDateTime(datetime.fromisoformat(data["when"]).astimezone()))

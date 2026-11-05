@@ -1,4 +1,6 @@
 from dataclasses import asdict
+from itertools import groupby
+from PySide6.QtCore import Qt
 from pathlib import Path
 from PySide6.QtWidgets import (QWidget, QFormLayout, QComboBox, QLineEdit, QSpinBox, QCheckBox, QPushButton, QFileDialog, QGridLayout)
 from capture.screen_capture import monitors
@@ -15,6 +17,12 @@ class CapturePanel(QWidget):
         self.monitor.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         for index, m in enumerate(monitors()):
             self.monitor.addItem(f"{index}: {'全部顯示器' if index == 0 else '顯示器'} {m}", index)
+        self.resolution = QComboBox()
+        self.resolution.addItem("原始尺寸", None)
+        for width, height in [(1280, 720), (1366, 768), (1600, 900), (1920, 1080),
+                              (1920, 1200), (2560, 1440), (3440, 1440), (3840, 2160)]:
+            self.resolution.addItem(f"{width} × {height}", [width, height])
+        self.resolution.setCurrentIndex(self.resolution.findData([1920, 1080]))
         self.windows = QComboBox()
         self.windows.setMinimumContentsLength(35)
         self.windows.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
@@ -29,7 +37,7 @@ class CapturePanel(QWidget):
             field = QSpinBox()
             field.setRange(-100000 if key in ("left","top") else 1,100000)
             field.setValue(value)
-            field.setPrefix(key + ": ")
+            field.setPrefix({"left": "左：", "top": "上：", "width": "寬：", "height": "高："}[key])
             self.region[key] = field
             row.addWidget(field, index // 2, index % 2)
         pick = QPushButton("拖曳選取區域（Esc 取消）")
@@ -44,19 +52,36 @@ class CapturePanel(QWidget):
         self.quality.setValue(90)
         self.date = QCheckBox("自動建立日期資料夾")
         self.date.setChecked(True)
-        for label, widget in [("任務名稱", self.name),("顯示器",self.monitor),("目標視窗",self.windows),("",refresh),("標題關鍵字",self.keyword),("",self.fallback)]:
+        for label, widget in [("任務名稱", self.name),("顯示器",self.monitor),("全螢幕輸出解析度",self.resolution),("目標視窗",self.windows),("",refresh),("標題關鍵字",self.keyword),("",self.fallback)]:
             layout.addRow(label,widget)
         layout.addRow("實體像素座標",row)
         layout.addRow(pick)
-        for label, widget in [("儲存位置",self.folder),("",browse),("格式",self.format),("JPG Quality",self.quality),("",self.date)]:
+        for label, widget in [("儲存位置",self.folder),("",browse),("格式",self.format),("JPG 品質",self.quality),("",self.date)]:
             layout.addRow(label,widget)
         self.refresh()
 
     def refresh(self):
+        selected = self.windows.currentData()
+        windows = sorted(list_windows(), key=lambda w: (w.process.casefold(), w.title.casefold()))
         self.windows.clear()
-        for w in list_windows():
-            l,t,r,b = w.rect
-            self.windows.addItem(f"{w.process} | {w.title} | {w.pid} | {w.hwnd} | {r-l}×{b-t} | {'Minimized' if w.minimized else ('Maximized' if w.maximized else 'Normal')}", asdict(w))
+        first = selected_index = -1
+        for process, group in groupby(windows, key=lambda w: w.process.casefold()):
+            self.windows.addItem(process.upper())
+            header = self.windows.model().item(self.windows.count() - 1)
+            header.setFlags(Qt.NoItemFlags)
+            for w in group:
+                left, top, right, bottom = w.rect
+                state = "最小化" if w.minimized else ("最大化" if w.maximized else "一般")
+                index = self.windows.count()
+                self.windows.addItem(
+                    f"    {w.title} | {right-left}×{bottom-top} | {state} | PID {w.pid}",
+                    asdict(w),
+                )
+                if first == -1:
+                    first = index
+                if selected and (w.hwnd, w.pid) == (selected["hwnd"], selected["pid"]):
+                    selected_index = index
+        self.windows.setCurrentIndex(selected_index if selected_index != -1 else first)
 
     def select_region(self):
         self.overlay = RegionOverlay()
@@ -82,7 +107,7 @@ class CapturePanel(QWidget):
             window["keyword"] = self.keyword.text() or window["title"]
         if not self.folder.text().strip():
             raise ValueError("請選擇儲存位置")
-        return dict(name=self.name.text() or "Capture", mode=mode, monitor=self.monitor.currentData(), window=window, region={k:v.value() for k,v in self.region.items()}, fallback=self.fallback.isChecked(), folder=self.folder.text(), format=self.format.currentText(), quality=self.quality.value(), date_folder=self.date.isChecked())
+        return dict(name=self.name.text() or "Capture", mode=mode, monitor=self.monitor.currentData(), resolution=self.resolution.currentData(), window=window, region={k:v.value() for k,v in self.region.items()}, fallback=self.fallback.isChecked(), folder=self.folder.text(), format=self.format.currentText(), quality=self.quality.value(), date_folder=self.date.isChecked())
 
     def restore(self, data):
         self.name.setText(data["name"])
@@ -93,6 +118,7 @@ class CapturePanel(QWidget):
         self.fallback.setChecked(data.get("fallback",False))
         self.set_region(data["region"])
         self.monitor.setCurrentIndex(max(0,self.monitor.findData(data["monitor"])))
+        self.resolution.setCurrentIndex(max(0, self.resolution.findData(data.get("resolution"))))
         target = data.get("window")
         if target:
             self.windows.addItem(f"已儲存目標：{target['process']} | {target['title']}",target)

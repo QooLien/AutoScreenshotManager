@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from PySide6.QtCore import QObject, Signal, QTimer, Qt
-from PySide6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QListWidget, QPushButton, QLabel, QMessageBox, QFileDialog, QSplitter, QScrollArea)
+from PySide6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem, QPushButton, QLabel, QMessageBox, QFileDialog, QSplitter, QScrollArea)
 from capture.service import capture
 from gui.capture_panel import CapturePanel
 from gui.scheduler_panel import SchedulerPanel
@@ -13,6 +13,18 @@ from scheduler.task_scheduler import TaskScheduler
 from utils.file_manager import save_image, append_history
 from utils.config_manager import save_config, load_config
 from utils.logger import setup_logging
+
+MODE_LABELS = {
+    "Full Screen": "全螢幕擷取",
+    "Selected Region": "指定區域",
+    "Window Capture": "指定視窗",
+    "Application Capture": "指定應用程式",
+}
+STATUS_LABELS = {
+    "Ready": "就緒", "Scheduled": "已排程", "Running": "擷取中",
+    "Stopped": "已停止", "Paused": "已暫停", "Complete": "已完成", "Error": "失敗",
+}
+
 
 class Signals(QObject):
     request = Signal(str)
@@ -37,7 +49,10 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(widget)
         splitter = QSplitter()
         self.modes = QListWidget()
-        self.modes.addItems(["Full Screen","Selected Region","Window Capture","Application Capture"])
+        for mode, label in MODE_LABELS.items():
+            item = QListWidgetItem(label)
+            item.setData(Qt.UserRole, mode)
+            self.modes.addItem(item)
         self.modes.setCurrentRow(0)
         splitter.addWidget(self.modes)
         center = QWidget()
@@ -57,12 +72,12 @@ class MainWindow(QMainWindow):
         self.task_list = QListWidget()
         layout.addWidget(self.task_list,1)
         controls = QHBoxLayout()
-        for label, callback in [("Capture Now",self.capture_now),("Start Schedule",self.start_schedule),("Pause",lambda:self.control("pause")),("Resume",lambda:self.control("resume")),("Stop",lambda:self.control("stop")),("Save Profile",self.save_profile),("Load Profile",self.load_profile)]:
+        for label, callback in [("立即截圖",self.capture_now),("啟動排程",self.start_schedule),("暫停",lambda:self.control("pause")),("繼續",lambda:self.control("resume")),("停止",lambda:self.control("stop")),("儲存設定檔",self.save_profile),("載入設定檔",self.load_profile)]:
             button = QPushButton(label)
             button.clicked.connect(callback)
             controls.addWidget(button)
         layout.addLayout(controls)
-        self.status = QLabel("就緒。編輯設定只影響新任務；每次 Start Schedule 建立獨立任務。")
+        self.status = QLabel("就緒。編輯設定只影響新任務；每次啟動排程都會建立獨立任務。")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.timer = QTimer(self)
@@ -70,7 +85,7 @@ class MainWindow(QMainWindow):
         self.timer.start(1000)
 
     def settings(self):
-        settings = self.capture_panel.settings(self.modes.currentItem().text())
+        settings = self.capture_panel.settings(self.modes.currentItem().data(Qt.UserRole))
         settings["schedule"] = self.schedule_panel.settings()
         return settings
 
@@ -175,7 +190,7 @@ class MainWindow(QMainWindow):
         selected_id = selected.data(Qt.UserRole) if selected else None
         self.task_list.clear()
         for task_id, task in self.tasks.items():
-            item = QListWidgetItem(f"{task['settings']['name']} | {task['settings']['mode']} | {task['status']} | Total {task['count']} | Last {task['last']} | Next {self.scheduler.next_time(task_id)} | {task['error']}")
+            item = QListWidgetItem(f"{task['settings']['name']} | {MODE_LABELS[task['settings']['mode']]} | {STATUS_LABELS[task['status']]} | 張數 {task['count']} | 上次 {task['last']} | 下次 {self.scheduler.next_time(task_id)} | {task['error']}")
             item.setData(Qt.UserRole,task_id)
             self.task_list.addItem(item)
             if task_id == selected_id:
@@ -198,7 +213,7 @@ class MainWindow(QMainWindow):
                 if data.get("version") != 1:
                     raise ValueError("不支援的設定檔版本")
                 settings = data["settings"]
-                matches = self.modes.findItems(settings["mode"],Qt.MatchExactly)
+                matches = self.modes.findItems(MODE_LABELS.get(settings["mode"], ""), Qt.MatchExactly)
                 if not matches:
                     raise ValueError("不支援的截圖模式")
                 self.capture_panel.restore(settings)

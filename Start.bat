@@ -15,7 +15,7 @@ if errorlevel 1 (
     if errorlevel 1 goto install_error
 )
 
-".venv\Scripts\python.exe" main.py
+start "" ".venv\Scripts\pythonw.exe" main.py
 if errorlevel 1 goto startup_error
 exit /b 0
 
@@ -40,7 +40,7 @@ echo Could not install dependencies. Check the pip error above.
 goto failed
 
 :startup_error
-echo Auto Screenshot Manager could not start. Check the error above.
+echo Could not launch the GUI. Check that .venv\Scripts\pythonw.exe exists.
 
 :failed
 pause

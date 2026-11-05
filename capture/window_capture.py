@@ -9,7 +9,7 @@ def capture_window(target, allow_fallback=False):
     window = resolve_window(target)
     if window.minimized:
         raise RuntimeError("視窗已最小化；請先還原視窗。PrintWindow 無法保證擷取最小化視窗。")
-    left, top, right, bottom = window.rect
+    left, top, right, bottom = win32gui.GetWindowRect(window.hwnd)
     width, height = right-left, bottom-top
     hwnd_dc = win32gui.GetWindowDC(window.hwnd)
     source = destination = bitmap = old = None
